@@ -122,8 +122,10 @@ def reset_calls(fake):
 def test_full_poll_runs_searches_in_parallel(sent):
     fake = FakeGitHub([node(author=ME, number=1), node(author="alice", number=2)], delay=0.2)
     respx.post(API_URL).mock(side_effect=fake)
+    cfg = make_cfg("conservative")
+    cfg.settings.reply_tracking = False   # time only the searches, not the separate reply request
     start = time.time()
-    poller.poll_once(cfg=make_cfg("conservative"), client=GitHubClient(token="t"))
+    poller.poll_once(cfg=cfg, client=GitHubClient(token="t"))
     assert fake.calls["search"] >= 3
     assert fake.max_active >= 3
     assert time.time() - start < 0.2 * fake.calls["search"]

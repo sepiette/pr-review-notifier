@@ -92,11 +92,3 @@ sections:
     filters:
       authors: ["@me"]
       draft: true
-
-  - name: Replies to Me
-    # Open PRs in your repos where someone answered you in a review thread or @mentioned you,
-    # and you haven't posted since. Last, so PRs already in another section stay there (with 💬).
-    notify: false     # reply notifications are controlled by settings.notifications.replies
-    badge: false      # replies never count toward the menu bar number
-    filters:
-      has_replies_to_me: true

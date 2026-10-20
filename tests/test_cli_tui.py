@@ -22,7 +22,7 @@ def seed_inbox(cfg):
 def test_config_init_validate_and_sections():
     assert runner.invoke(app, ["config", "init"]).exit_code == 0
     r = runner.invoke(app, ["config", "validate"])
-    assert r.exit_code == 0 and "8 sections" in r.output
+    assert r.exit_code == 0 and "7 sections" in r.output
     r = runner.invoke(app, ["sections", "add", "Infra only", "--repos", "acme/api",
                             "--review-requested", "any", "--my-review", "not:approved", "--max-approvals", "1",
                             "--position", "1", "--badge"])

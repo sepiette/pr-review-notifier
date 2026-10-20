@@ -49,7 +49,7 @@ cd pr-review-notifier
 4. **Runs the setup wizard** (`prn setup`), which creates `./config.yaml` from `config.example.yaml`. It asks for:
    - **Repos to watch**, as `owner/name` separated by commas. It checks that you can access each one.
    - **Teammates.** It shows the people whose PRs you've reviewed most in those repos over the last 90 days. Pick them by number, type usernames, or both.
-   - **Which of the 8 starter sections to keep.** See [The starter sections](#the-starter-sections).
+   - **Which of the 7 starter sections to keep.** See [The starter sections](#the-starter-sections).
    - **Polling strategy** (conservative or aggressive, see [Polling strategies](#polling-strategies)), the **full poll interval** (default 300 seconds), and which notification types you want.
 5. **Fetches your PRs.** The first poll records the current state silently, so you don't get a burst of notifications about PRs that already exist.
 6. **Builds the PR Review Notifier app** with `prn app install`, so notifications say "PR Review Notifier" instead of "Python". See [Why there's an app](#why-theres-a-pr-review-notifierapp).
@@ -196,13 +196,13 @@ Once you post again (in that thread, or anywhere on the PR for a mention), the r
 
 **Where replies show up:**
 
-- **PRs already in a section** keep their place and get the 💬.
-- **The "Replies to Me" section** (last in the starter config) catches open PRs in your repos with unanswered replies that no other section claims. Examples: a teammate's PR you commented on that's already approved, or a PR from someone outside your teammates group.
+- **On the PR's existing row.** Replies don't get a section of their own: the PR stays where it is and gets the 💬.
+- **Only for PRs in your inbox.** A reply on a PR that isn't in any of your sections doesn't appear. To catch those too, add a section with the `has_replies_to_me: true` filter (see [Filters](#filters)).
 - **The TUI's detail panel** shows who replied, how long ago, and a link straight to the comment.
 
 **Notifications:** set `settings.notifications.replies: true` to get one when a new reply or mention arrives. It's off by default. The notification reads "@alice replied to your comment" or "@alice mentioned you", and clicking it opens that comment.
 
-**Turning it off:** `settings.reply_tracking: false` removes the 💬, the extra fetch, and the searches behind the Replies to Me section.
+**Turning it off:** `settings.reply_tracking: false` removes the 💬, the notifications, and the extra fetch.
 
 **GitHub cost:** reading review threads takes a second, cached request. It only runs for PRs whose activity changed since the last poll, so after the first poll it's usually zero or a few PRs.
 
@@ -242,7 +242,6 @@ Every PR is checked against the sections from top to bottom, and it appears only
 | 5 | **My Approved PRs** | Your PRs that GitHub considers approved | ✓ | |
 | 6 | **My Open PRs** | Your other non-draft PRs | | |
 | 7 | **My Draft PRs** | Your drafts | | |
-| 8 | **Replies to Me** | Open PRs where someone answered you in a review thread or @mentioned you, and you haven't posted since. Only PRs no other section claims | | |
 
 How a teammate's PR moves through the sections:
 
@@ -339,7 +338,7 @@ All filters in a section must match (AND). Inside a list, any one item can match
 | `conflicts` | `true` / `false` | GitHub reports merge conflicts with the base branch. While GitHub is still computing, this counts as no conflicts |
 | `ready_to_merge` | `true` / `false` | GitHub's merge state is clean: branch protection is satisfied (required reviews and required checks such as policy-bot), every other check passed, and there are no conflicts. While GitHub is still computing, this counts as not ready |
 | `awaiting_approval_from` | usernames | Any of these reviewers hasn't approved the PR's **latest commit**, for example `[coderabbitai]` while it re-reviews a new push. Not affected by `ignored_reviewers` |
-| `has_replies_to_me` | `true` / `false` | Someone replied in a review thread you're in, or @mentioned you, and you haven't posted since. Needs `reply_tracking`. Also makes prn search for open PRs you've commented on or been mentioned in |
+| `has_replies_to_me` | `true` / `false` | Someone replied in a review thread you're in, or @mentioned you, and you haven't posted since. Needs `reply_tracking`. Optional: the starter config doesn't use it. Adding it to a section also makes prn search for open PRs you've commented on, reviewed, or been mentioned in |
 | `approved_by` | usernames | Any of these reviewers has approved the PR's **latest commit**. An approval on an older commit doesn't count. Not affected by `ignored_reviewers` |
 | `updated_within_days` | number | Updated within the last N days |
 

@@ -132,25 +132,35 @@ def with_reply(n, count=1, at=T2, who="alice", kind="reply"):
     return pr
 
 
-def test_replies_section_catches_only_otherwise_unsectioned_prs(cfg):
+def test_replies_mark_inbox_prs_without_a_section_of_their_own(cfg):
+    """No "Replies to Me" section in the starter config: replies only mark PRs already in a section."""
+    assert not any(s.filters.has_replies_to_me for s in cfg.sections)
     in_teammates = with_reply(node(author="alice", number=11))
-    elsewhere = with_reply(node(author="dave", number=12))     # not a teammate, not requested: only "Replies to Me"
-    no_reply = parse_pr(node(author="dave", number=13))
-    res = {s.name: [p.number for p in s.prs] for s in evaluate([in_teammates, elsewhere, no_reply], cfg, ME)}
-    assert res["Teammates Need Review"] == [11] and res["Replies to Me"] == [12]
-    assert 13 not in sum(res.values(), [])
+    elsewhere = with_reply(node(author="dave", number=12))     # in no section: not shown at all
+    res = {s.name: [p.number for p in s.prs] for s in evaluate([in_teammates, elsewhere], cfg, ME)}
+    assert res["Teammates Need Review"] == [11]
+    assert 12 not in sum(res.values(), [])
+
+
+def test_optional_replies_section_still_works(cfg):
+    cfg.sections.append(parse("defaults: {repos: [acme/web]}\n"
+                              "sections: [{name: Replies, filters: {has_replies_to_me: true}}]").sections[0])
+    res = {s.name: [p.number for p in s.prs] for s in evaluate([with_reply(node(author="dave", number=12))], cfg, ME)}
+    assert res["Replies"] == [12]
 
 
 def test_replies_never_count_toward_badge(cfg):
-    inbox = store.write_inbox(evaluate([with_reply(node(author="dave", number=14))], cfg, ME), ME, next_poll_at=None)
+    mine = with_reply(node(author=ME, number=14))          # My Open PRs: no badge, with or without replies
+    inbox = store.write_inbox(evaluate([mine], cfg, ME), ME, next_poll_at=None)
     assert inbox.total == 1 and inbox.badge_count == 0
 
 
 def test_extra_searches_only_when_a_section_wants_replies(cfg):
+    assert not any("involves:" in q or "reviewed-by:" in q for q in plan_queries(cfg, ME))   # starter config
+    cfg.sections.append(parse("defaults: {repos: [acme/web]}\n"
+                              "sections: [{name: Replies, filters: {has_replies_to_me: true}}]").sections[0])
     qs = plan_queries(cfg, ME)
     assert any(f"involves:{ME}" in q for q in qs) and any(f"reviewed-by:{ME}" in q for q in qs)
-    cfg.sections = [s for s in cfg.sections if not s.filters.has_replies_to_me]
-    assert not any("involves:" in q for q in plan_queries(cfg, ME))
 
 
 # ---------------------------------------------------------------- notifications
@@ -162,8 +172,8 @@ def snap(cfg, prs):
 
 def test_new_reply_notifies_with_deep_link(cfg):
     cfg.settings.notifications.replies = True
-    before = parse_pr(node(author="dave", number=20))
-    after = with_reply(node(author="dave", number=20), at=T3)
+    before = parse_pr(node(author="alice", number=20))
+    after = with_reply(node(author="alice", number=20), at=T3)
     evs = ev.diff(snap(cfg, [before]), evaluate([after], cfg, ME), [after], cfg, ME)
     reply_evs = [e for e in evs if e.kind == ev.REPLY]
     assert [e.detail for e in reply_evs] == ["@alice replied to your comment"]
@@ -172,8 +182,8 @@ def test_new_reply_notifies_with_deep_link(cfg):
 
 
 def test_reply_notifications_are_off_by_default_and_baselined(cfg):
-    after = with_reply(node(author="dave", number=21), at=T3)
-    before = parse_pr(node(author="dave", number=21))
+    after = with_reply(node(author="alice", number=21), at=T3)
+    before = parse_pr(node(author="alice", number=21))
     assert not [e for e in ev.diff(snap(cfg, [before]), evaluate([after], cfg, ME), [after], cfg, ME)
                 if e.kind == ev.REPLY]                      # default: replies: false
     cfg.settings.notifications.replies = True
@@ -185,7 +195,7 @@ def test_reply_notifications_are_off_by_default_and_baselined(cfg):
 
 def test_same_reply_doesnt_notify_twice(cfg):
     cfg.settings.notifications.replies = True
-    pr = with_reply(node(author="dave", number=22), at=T3)
+    pr = with_reply(node(author="alice", number=22), at=T3)
     assert not [e for e in ev.diff(snap(cfg, [pr]), evaluate([pr], cfg, ME), [pr], cfg, ME) if e.kind == ev.REPLY]
 
 
@@ -222,7 +232,7 @@ def test_tui_shows_marker_and_detail(cfg):
     from prn.tui import PRNTui
 
     write_config()
-    pr = with_reply(node(author="dave", number=50, title="Question PR"), at=T2)
+    pr = with_reply(node(author="alice", number=50, title="Question PR"), at=T2)
     store.write_inbox(evaluate([pr], cfg, ME), ME, next_poll_at=None)
 
     async def go():
@@ -241,7 +251,9 @@ def test_tui_shows_marker_and_detail(cfg):
 
 
 def test_replies_section_does_not_scan_every_open_pr(cfg):
-    """Regression: the Replies to Me section has no author filter, but must not trigger a repo-wide search."""
+    """Regression: a replies section has no author filter, but must not trigger a repo-wide search."""
+    cfg.sections.append(parse("defaults: {repos: [acme/web]}\n"
+                              "sections: [{name: Replies, filters: {has_replies_to_me: true}}]").sections[0])
     qs = plan_queries(cfg, ME)
     narrowing = ("author:", "review-requested:", "involves:", "reviewed-by:")
     assert all(any(n in q for n in narrowing) for q in qs), qs

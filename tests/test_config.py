@@ -13,7 +13,6 @@ def test_default_config_is_valid(cfg):
         "My Approved PRs",
         "My Open PRs",
         "My Draft PRs",
-        "Replies to Me",
     ]
     assert cfg.defaults.repos == ["acme/web", "acme/api"]
     assert cfg.settings.poll_interval_seconds == 300
