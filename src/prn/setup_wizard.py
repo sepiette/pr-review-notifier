@@ -144,6 +144,15 @@ def _ask_sections(ed: ConfigEditor) -> None:
     for n in names:
         if n not in keep:
             ed.remove_section(n)
+    _ask_replies_section(ed)
+
+
+def _ask_replies_section(ed: ConfigEditor) -> None:
+    settings = ed.doc["settings"]
+    current = bool(settings.get("replies_section", False))
+    settings["replies_section"] = Confirm.ask(
+        "Add a [bold]Replies to Me[/bold] section for PRs where someone answered you or @mentioned you, "
+        "but that no other section shows? (Replies always get a 💬 either way.)", default=current)
 
 
 def _ask_polling_and_notifications(ed: ConfigEditor) -> None:

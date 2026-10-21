@@ -109,6 +109,9 @@ class Settings(_Strict):
     max_title_length: int = Field(default=50, ge=10)
     read_tracking: bool = True         # fade PRs you've opened until there's new activity on them
     reply_tracking: bool = True        # detect replies to my comments and @mentions (💬 marker)
+    # Add a "Replies to Me" section at the bottom for open PRs with unanswered replies that no other
+    # section shows (e.g. PRs you commented on outside your teammates). Off by default.
+    replies_section: bool = False
     ignore_bot_reviews: bool = False   # don't count bot reviews for has_reviews_from_others
     # Reviewers whose reviews never count toward `approvals` or `has_reviews_from_others`
     ignored_reviewers: list[str] = Field(default_factory=list)
@@ -125,6 +128,16 @@ class Defaults(_Strict):
             if not REPO_RE.match(r):
                 raise ValueError(f"repo '{r}' must be in owner/name form")
         return v
+
+
+REPLIES_SECTION_NAME = "Replies to Me"
+
+
+def replies_section() -> Section:
+    """The section `settings.replies_section: true` adds. Never badged; reply notifications are
+    controlled by settings.notifications.replies, so the section itself doesn't notify."""
+    return Section(name=REPLIES_SECTION_NAME, notify=False, badge=False,
+                   filters=Filters(has_replies_to_me=True))
 
 
 class Config(_Strict):
@@ -144,6 +157,11 @@ class Config(_Strict):
             for who in (s.filters.authors or []) + s.filters.exclude_authors:
                 if who.startswith("group:") and who[6:] not in self.groups:
                     raise ValueError(f"section '{s.name}' references unknown group '{who}'")
+        # settings.replies_section: add the built-in section last, unless the config already has one.
+        if (self.settings.replies_section and self.settings.reply_tracking
+                and not any(s.filters.has_replies_to_me for s in self.sections)
+                and REPLIES_SECTION_NAME.lower() not in seen):
+            self.sections.append(replies_section())
         return self
 
     def ignored_reviewer_logins(self) -> frozenset[str]:

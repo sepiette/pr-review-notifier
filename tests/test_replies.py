@@ -260,3 +260,54 @@ def test_replies_section_does_not_scan_every_open_pr(cfg):
     # a section that really has no narrowing still gets a repo scan
     cfg.sections.append(parse('defaults: {repos: [acme/web]}\nsections: [{name: Everything}]').sections[0])
     assert any("repo:acme/web" in q and "author:" not in q for q in plan_queries(cfg, ME))
+
+
+# ---------------------------------------------------------------- settings.replies_section
+
+
+def cfg_with(settings_yaml="", sections_yaml=""):
+    """The test config with some `key: value` settings overridden (lines like '  replies_section: true')."""
+    import re
+    text = test_config_text()
+    for line in filter(None, settings_yaml.splitlines()):
+        key = line.split(":")[0].strip()
+        text, n = re.subn(rf"^  {key}:.*$", line, text, count=1, flags=re.M)
+        assert n == 1, key
+    if sections_yaml:
+        text = text.rstrip("\n") + "\n" + sections_yaml
+    return parse(text)
+
+
+def test_replies_section_is_off_by_default(cfg):
+    assert cfg.settings.replies_section is False
+    assert "Replies to Me" not in [s.name for s in cfg.sections]
+
+
+def test_replies_section_setting_adds_it_last():
+    cfg = cfg_with("  replies_section: true\n")
+    last = cfg.sections[-1]
+    assert (last.name, last.notify, last.badge, last.filters.has_replies_to_me) == ("Replies to Me", False, False, True)
+    # PRs outside every other section land there, and it never adds to the badge
+    elsewhere = with_reply(node(author="dave", number=60))
+    results = evaluate([elsewhere], cfg, ME)
+    assert {s.name: [p.number for p in s.prs] for s in results}["Replies to Me"] == [60]
+    assert store.write_inbox(results, ME, next_poll_at=None).badge_count == 0
+    # and it adds only the two narrow searches, never a scan of every open PR
+    qs = plan_queries(cfg, ME)
+    assert any(f"involves:{ME}" in q for q in qs) and any(f"reviewed-by:{ME}" in q for q in qs)
+    assert all(any(n in q for n in ("author:", "review-requested:", "involves:", "reviewed-by:")) for q in qs)
+
+
+def test_replies_section_needs_reply_tracking():
+    cfg = cfg_with("  replies_section: true\n  reply_tracking: false\n")
+    assert "Replies to Me" not in [s.name for s in cfg.sections]
+
+
+def test_replies_section_doesnt_duplicate_a_custom_one():
+    custom = "  - name: Answers\n    filters: {has_replies_to_me: true}\n"
+    cfg = cfg_with("  replies_section: true\n", custom)
+    assert [s.name for s in cfg.sections].count("Answers") == 1
+    assert "Replies to Me" not in [s.name for s in cfg.sections]
+    same_name = "  - name: Replies to Me\n    filters: {labels: [question]}\n"
+    cfg = cfg_with("  replies_section: true\n", same_name)       # name taken: keep the user's section
+    assert [s.name for s in cfg.sections].count("Replies to Me") == 1
