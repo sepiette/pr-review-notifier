@@ -22,8 +22,9 @@ log = logging.getLogger(__name__)
 API_URL = "https://api.github.com/graphql"
 SEARCH_BASE = "is:pr is:open archived:false"
 MAX_QUERY_LEN = 256          # GitHub search query length limit
-PAGE_SIZE = 50
-MAX_PAGES = 20               # 1000 results: GitHub's search ceiling
+PAGE_SIZE = 25               # GitHub gives up on a GraphQL query after ~10s (502); 50 heavy PRs per page got close
+MIN_PAGE_SIZE = 5            # on a timeout, a search page is retried at half the size down to this
+MAX_RESULTS = 1000           # GitHub's search ceiling
 CHECK_PAGE_SIZE = 100        # change checks fetch one page per search; more than this falls back to a full poll
 NODES_BATCH = 25             # PRs per refetch request
 MAX_PARALLEL = 6             # concurrent GraphQL requests
@@ -38,6 +39,10 @@ class GitHubError(Exception):
 
 class AuthError(GitHubError):
     pass
+
+
+class GatewayTimeout(GitHubError):
+    """GitHub returned 502/504, which for GraphQL usually means the query ran past its time limit."""
 
 
 def find_binary(name: str) -> Optional[str]:
@@ -70,9 +75,12 @@ def get_token() -> str:
 
 # ---------------------------------------------------------------- GraphQL
 
+# mergeStateStatus roughly doubles how long GitHub takes to answer, so it's only requested
+# ($mergeState) when a section filters on ready_to_merge.
 PR_FIELDS = """
 fragment PRFields on PullRequest {
-  id number title url isDraft createdAt updatedAt reviewDecision mergeable mergeStateStatus baseRefName
+  id number title url isDraft createdAt updatedAt reviewDecision mergeable baseRefName
+  mergeStateStatus @include(if: $mergeState)
   repository { nameWithOwner }
   author { __typename login }
   labels(first: 20) { nodes { name } }
@@ -102,7 +110,7 @@ fragment PRFields on PullRequest {
 SEARCH_QUERY = (
     PR_FIELDS
     + """
-query($q: String!, $first: Int!, $after: String) {
+query($q: String!, $first: Int!, $after: String, $mergeState: Boolean = false) {
   rateLimit { remaining resetAt cost }
   search(query: $q, type: ISSUE, first: $first, after: $after) {
     issueCount
@@ -116,7 +124,7 @@ query($q: String!, $first: Int!, $after: String) {
 NODES_QUERY = (
     PR_FIELDS
     + """
-query($ids: [ID!]!) {
+query($ids: [ID!]!, $mergeState: Boolean = false) {
   rateLimit { remaining resetAt cost }
   nodes(ids: $ids) { ...PRFields }
 }
@@ -171,7 +179,7 @@ class GitHubClient:
     def close(self) -> None:
         self._http.close()
 
-    def graphql(self, query: str, variables: Optional[dict] = None) -> dict:
+    def graphql(self, query: str, variables: Optional[dict] = None, retry_timeouts: bool = True) -> dict:
         payload = {"query": query, "variables": variables or {}}
         for attempt in range(3):
             try:
@@ -183,9 +191,13 @@ class GitHubClient:
                 continue
             if resp.status_code == 401:
                 raise AuthError("GitHub rejected the token (401). Run `gh auth login` again.")
-            if resp.status_code in (502, 503, 504) and attempt < 2:
+            timeout = resp.status_code in (502, 504)
+            if resp.status_code in (502, 503, 504) and attempt < 2 and (retry_timeouts or not timeout):
                 time.sleep(2 ** attempt)
                 continue
+            if timeout:
+                raise GatewayTimeout(f"GitHub timed out answering a query ({resp.status_code}). "
+                                     "prn will try again on the next poll.")
             if resp.status_code >= 400:
                 raise GitHubError(f"GitHub API error {resp.status_code}: {resp.text[:300]}")
             body = resp.json()
@@ -236,11 +248,19 @@ class GitHubClient:
                 after = data["pageInfo"]["endCursor"]
         return counts.most_common(limit)
 
-    def search_prs(self, q: str) -> list[dict]:
+    def search_prs(self, q: str, merge_state: bool = False) -> list[dict]:
         nodes: list[dict] = []
-        after = None
-        for _ in range(MAX_PAGES):
-            data = self.graphql(SEARCH_QUERY, {"q": q, "first": PAGE_SIZE, "after": after})
+        after, first = None, PAGE_SIZE
+        while len(nodes) < MAX_RESULTS:
+            variables = {"q": q, "first": first, "after": after, "mergeState": merge_state}
+            try:
+                data = self.graphql(SEARCH_QUERY, variables, retry_timeouts=first <= MIN_PAGE_SIZE)
+            except GatewayTimeout:
+                if first <= MIN_PAGE_SIZE:
+                    raise
+                first = max(MIN_PAGE_SIZE, first // 2)
+                log.warning("GitHub timed out on a search page; retrying with %d PRs per page", first)
+                continue
             search = data["search"]
             nodes.extend(n for n in search["nodes"] if n)
             if not search["pageInfo"]["hasNextPage"]:
@@ -262,10 +282,11 @@ class GitHubClient:
             out.append([n for n in search["nodes"] if n])
         return out
 
-    def nodes_by_id(self, ids: list[str]) -> list[dict]:
+    def nodes_by_id(self, ids: list[str], merge_state: bool = False) -> list[dict]:
         """Full PR nodes for `ids`, fetched in parallel batches. PRs that no longer exist are dropped."""
         batches = [ids[i:i + NODES_BATCH] for i in range(0, len(ids), NODES_BATCH)]
-        results = _parallel(lambda b: self.graphql(NODES_QUERY, {"ids": b})["nodes"], batches)
+        results = _parallel(lambda b: self.graphql(NODES_QUERY, {"ids": b, "mergeState": merge_state})["nodes"],
+                            batches)
         return [n for batch in results for n in batch if n]
 
 
@@ -439,12 +460,16 @@ class Fetched:
     requested_ids: set[str] = field(default_factory=set)   # PRs returned by a `review-requested:@me` search
 
 
-def fetch_all(client: GitHubClient, queries: list[str]) -> Fetched:
+def needs_merge_state(cfg: Config) -> bool:
+    return any(s.filters.ready_to_merge is not None for s in cfg.sections)
+
+
+def fetch_all(client: GitHubClient, queries: list[str], merge_state: bool = False) -> Fetched:
     """Run every search in parallel and union the results by PR id."""
     for q in queries:
         log.debug("search: %s", q)
     out = Fetched()
-    for q, nodes in zip(queries, _parallel(client.search_prs, queries)):
+    for q, nodes in zip(queries, _parallel(lambda q: client.search_prs(q, merge_state), queries)):
         for n in nodes:
             out.nodes[n["id"]] = n
             if REVIEW_REQUESTED_ME in q:
@@ -496,4 +521,4 @@ def build_prs(fetched: Fetched, cfg: Config) -> list[PR]:
 
 def fetch_prs(client: GitHubClient, cfg: Config, me: str) -> list[PR]:
     """Run planned queries, union by PR id, and mark which PRs request a review from me."""
-    return build_prs(fetch_all(client, plan_queries(cfg, me)), cfg)
+    return build_prs(fetch_all(client, plan_queries(cfg, me), needs_merge_state(cfg)), cfg)

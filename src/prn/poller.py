@@ -17,7 +17,7 @@ from . import notify, replies, store
 from .config import Config
 from .engine import SectionResult, evaluate
 from .github import (AuthError, Fingerprint, Fetched, GitHubClient, allowed_repos, build_prs, check_all,
-                     fetch_all, plan_queries)
+                     fetch_all, needs_merge_state, plan_queries)
 
 log = logging.getLogger(__name__)
 
@@ -82,7 +82,7 @@ def poll_once(
         points_before = client.points_used
         try:
             me = _viewer(client)
-            prs = build_prs(fetch_all(client, plan_queries(cfg, me)), cfg)
+            prs = build_prs(fetch_all(client, plan_queries(cfg, me), needs_merge_state(cfg)), cfg)
             replies.attach(client, prs, cfg, me)
         except Exception as exc:
             store.write_inbox_error(str(exc))
@@ -178,7 +178,7 @@ class Poller:
                         log.warning("a search returned more than one page: change checks are off until the next full poll")
                     else:
                         fingerprints = checked[0]
-                fetched = fetch_all(self.client, queries)
+                fetched = fetch_all(self.client, queries, needs_merge_state(cfg))
             except Exception as exc:
                 store.write_inbox_error(str(exc))
                 raise
@@ -224,7 +224,8 @@ class Poller:
                     log.debug("check: no changes, %.1fs, %d pts", dur, points)
                     return PollResult(inbox=None, kind="check", duration_s=dur, points=points)
 
-                refetched = {n["id"]: n for n in self.client.nodes_by_id(changed)} if changed else {}
+                refetched = ({n["id"]: n for n in self.client.nodes_by_id(changed, needs_merge_state(cfg))}
+                             if changed else {})
             except Exception as exc:
                 store.write_inbox_error(str(exc))
                 raise
