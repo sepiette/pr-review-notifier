@@ -66,8 +66,8 @@ class Filters(_Strict):
     ci: Optional[CIState] = None
     conflicts: Optional[bool] = None            # GitHub reports merge conflicts with the base branch
     ready_to_merge: Optional[bool] = None       # GitHub would let you merge now: required checks + all checks pass, no conflicts
-    awaiting_approval_from: list[str] = Field(default_factory=list)  # ANY of these hasn't approved the latest commit
-    approved_by: list[str] = Field(default_factory=list)  # ANY of these has approved the latest commit
+    awaiting_approval_from: list[str] = Field(default_factory=list)  # ANY of these has no approval GitHub counts
+    approved_by: list[str] = Field(default_factory=list)  # ANY of these has an approval GitHub counts
     has_replies_to_me: Optional[bool] = None    # unanswered thread replies / @mentions (needs reply_tracking)
     updated_within_days: Optional[int] = Field(default=None, ge=1)
 

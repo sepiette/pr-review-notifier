@@ -203,7 +203,7 @@ sections:
     assert [p.number for p in res[1].prs] == [clean["number"], unknown["number"]]
 
 
-def test_awaiting_approval_from_requires_approval_on_latest_commit():
+def test_awaiting_approval_from_matches_githubs_view_of_approvals():
     from prn.config import parse
     c = parse("""
 defaults: {repos: [acme/web]}
@@ -211,12 +211,19 @@ sections:
   - name: Waiting on CodeRabbit
     filters: {awaiting_approval_from: ["coderabbitai[bot]"]}
 """)
-    approved_head = node(reviews=[review("coderabbitai", "APPROVED", bot=True, commit="head-sha")])
-    approved_old = node(reviews=[review("coderabbitai", "APPROVED", bot=True, commit="old-sha")])
-    commented_head = node(reviews=[review("coderabbitai", "COMMENTED", bot=True, commit="head-sha")])
+    bot = dict(bot=True)
+    approved_head = node(reviews=[review("coderabbitai", "APPROVED", commit="head-sha", **bot)])
+    approved_old = node(reviews=[review("coderabbitai", "APPROVED", commit="old-sha", **bot)])   # still counts
+    then_commented = node(reviews=[review("coderabbitai", "APPROVED", commit="old-sha", **bot),
+                                   review("coderabbitai", "COMMENTED", commit="head-sha", **bot)])
+    dismissed = node(reviews=[review("coderabbitai", "DISMISSED", commit="old-sha", **bot)])
+    then_changes = node(reviews=[review("coderabbitai", "APPROVED", commit="old-sha", **bot),
+                                 review("coderabbitai", "CHANGES_REQUESTED", commit="head-sha", **bot)])
+    commented_only = node(reviews=[review("coderabbitai", "COMMENTED", commit="head-sha", **bot)])
     never = node()
-    res = evaluate([parse_pr(n) for n in (approved_head, approved_old, commented_head, never)], c, ME)
-    assert [p.number for p in res[0].prs] == [approved_old["number"], commented_head["number"], never["number"]]
+    prs = [approved_head, approved_old, then_commented, dismissed, then_changes, commented_only, never]
+    res = evaluate([parse_pr(n) for n in prs], c, ME)
+    assert [p.number for p in res[0].prs] == [n["number"] for n in (dismissed, then_changes, commented_only, never)]
 
 
 def test_ready_to_merge_filter():
@@ -241,7 +248,7 @@ sections:
     assert [p.number for p in res[0].prs] == [blocked["number"], unstable["number"], dirty["number"], unknown["number"]]
 
 
-def test_approved_by_requires_any_listed_approval_on_latest_commit():
+def test_approved_by_requires_an_approval_github_counts_from_any_listed_reviewer():
     from prn.config import parse
     c = parse("""
 defaults: {repos: [acme/web]}
@@ -252,9 +259,10 @@ sections:
     bot_head = node(reviews=[review("coderabbitai", "APPROVED", bot=True, commit="head-sha")])
     claire_head = node(reviews=[review("claire", "APPROVED", commit="head-sha")])
     claire_old = node(reviews=[review("claire", "APPROVED", commit="old-sha")])
+    claire_dismissed = node(reviews=[review("claire", "DISMISSED", commit="old-sha")])
     claire_changes = node(reviews=[review("claire", "CHANGES_REQUESTED", commit="head-sha")])
     other_head = node(reviews=[review("bob", "APPROVED", commit="head-sha")])
     never = node()
-    prs = [bot_head, claire_head, claire_old, claire_changes, other_head, never]
+    prs = [bot_head, claire_head, claire_old, claire_dismissed, claire_changes, other_head, never]
     res = evaluate([parse_pr(n) for n in prs], c, ME)
-    assert [p.number for p in res[0].prs] == [bot_head["number"], claire_head["number"]]
+    assert [p.number for p in res[0].prs] == [bot_head["number"], claire_head["number"], claire_old["number"]]
