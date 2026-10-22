@@ -85,6 +85,7 @@ class Section(_Strict):
     notify: bool = True
     badge: bool = False
     display: bool = True     # false: still claims matching PRs, but is left out of every inbox view
+    collapsed: bool = False  # start folded; clicking the header (menu bar) or Enter (TUI) toggles it
     filters: Filters = Field(default_factory=Filters)
 
 
@@ -136,7 +137,7 @@ REPLIES_SECTION_NAME = "Replies to Me"
 def replies_section() -> Section:
     """The section `settings.replies_section: true` adds. Never badged; reply notifications are
     controlled by settings.notifications.replies, so the section itself doesn't notify."""
-    return Section(name=REPLIES_SECTION_NAME, notify=False, badge=False,
+    return Section(name=REPLIES_SECTION_NAME, notify=False, badge=False, collapsed=True,
                    filters=Filters(has_replies_to_me=True))
 
 

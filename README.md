@@ -18,6 +18,7 @@ It's modeled on Graphite's inbox, and everything runs locally on your Mac.
 - [Using it](#using-it)
 - [Read and unread](#read-and-unread)
 - [Replies to you](#replies-to-you)
+- [Folding sections](#folding-sections)
 - [The starter sections](#the-starter-sections)
 - [Config reference](#config-reference)
 - [Notifications](#notifications)
@@ -114,12 +115,13 @@ The dropdown contains:
 ```
 PR Review Notifier
 ───────────────────────────────
-Teammates Need Review (2)
+▾ Teammates Need Review (2)
    ✓   app-workflow#123  Add order export…   · teammate-one  💬
    ● ◆ infra-gitops#45   Bump chart version… · teammate-two
 ───────────────────────────────
-My Draft PRs (1)
-   ✗   api-llm#9  WIP: retry logic  (draft)  · you
+▸ My Draft PRs (1)                               ▸ (submenu: Show inline, then its PRs)
+───────────────────────────────
+▸ Replies to Me (2) · 💬 1
 ───────────────────────────────
 ✓ ✗ ● CI   ◆ approved / changes requested   💬 reply
 ───────────────────────────────
@@ -142,6 +144,17 @@ Quit PR Review Notifier    ⌘Q
 
 Empty sections are hidden (`hide_empty_sections`). Sections with `display: false` are never shown.
 
+### Folding sections
+
+Any section can be folded so it takes up one line:
+
+- **Menu bar:** click a `▾ Section (n)` header to fold it. It becomes `▸ Section (n)`, and hovering over it shows its PRs in a submenu, so you can still open them. To unfold it, choose **Show inline** at the top of that submenu.
+- **Terminal inbox:** move to a section header and press `Enter` to fold or unfold it. While you're filtering with `/`, folded sections show their matches anyway.
+- **Hint:** a folded header shows what's waiting inside, for example `▸ Replies to Me (3) · 💬 1 · 2 new`, so you know when to look.
+- **Remembered:** your choice is saved in `~/.local/state/prn/sections.json` and shared by the menu bar and the TUI. It survives restarts.
+- **Starting state:** set `collapsed: true` on a section in `config.yaml` to have it start folded. If you change a section's `collapsed:` value later, the config wins over your earlier click.
+- **Badge:** folding doesn't change what counts toward the badge. A folded section with `badge: true` still adds to the number on the icon.
+
 ### The terminal inbox
 
 Run `prn` (or `pr-review-notifier`). Sections and PRs are on the left, with PRs you've already read muted. The selected PR's details are on the right: the base branch it merges into, reviews, requested reviewers, approvals, CI, labels, your own review state, and any replies to you (with a link to the comment). Rows with an unseen reply end in 💬. The view updates by itself whenever the menu bar app polls.
@@ -149,7 +162,7 @@ Run `prn` (or `pr-review-notifier`). Sections and PRs are on the left, with PRs 
 | Key | Action |
 |---|---|
 | `↑` / `↓` | Move |
-| `Enter` or `o` | Open the PR on GitHub |
+| `Enter` or `o` | Open the PR on GitHub. On a section header, `Enter` folds or unfolds the section |
 | `y` | Copy the PR URL |
 | `m` | Toggle the selected PR between read and unread |
 | `M` | Mark every PR shown as read |
@@ -198,7 +211,7 @@ Once you post again (in that thread, or anywhere on the PR for a mention), the r
 
 - **On the PR's existing row.** Replies don't get a section of their own: the PR stays where it is and gets the 💬.
 - **Only for PRs in your inbox, by default.** A reply on a PR that isn't in any of your sections doesn't appear.
-- **Optional "Replies to Me" section.** Set `settings.replies_section: true` (or answer yes in `prn setup`) to add a section at the bottom. It catches open PRs in your repos with unanswered replies that no other section claims, such as a teammate's PR you commented on that's already approved, or a PR from someone outside your teammates group.
+- **Optional "Replies to Me" section.** Set `settings.replies_section: true` (or answer yes in `prn setup`) to add a section at the bottom. It starts [folded](#folding-sections). It catches open PRs in your repos with unanswered replies that no other section claims, such as a teammate's PR you commented on that's already approved, or a PR from someone outside your teammates group.
   - It's never badged, and it doesn't send its own notifications; `notifications.replies` covers those.
   - It adds two small searches per poll, for PRs you've commented on, reviewed, or been mentioned in.
   - It's a setting rather than a YAML section, so it doesn't appear in `config.yaml`, and `prn sections move`/`remove` can't change it.
@@ -292,6 +305,7 @@ sections:                          # checked top to bottom; first match wins
   - name: Teammates Need Review
     notify: true                   # notify when a PR newly enters this section (default true)
     badge: true                    # count toward the menu bar number (default false)
+    collapsed: false               # true: start folded (see "Folding sections"); clicking toggles it
     display: true                  # false: still claims matching PRs, but hides the section everywhere
                                    #        and never sends "New in section" notifications
     filters:
@@ -424,6 +438,7 @@ macOS labels notifications, Login Items, and Activity Monitor entries with the a
   | `~/.local/state/prn/snapshot.json` | Last-seen PR state, used to detect changes |
 | `~/.local/state/prn/seen.json` | Read/unread state: what each PR looked like when you last opened it |
 | `~/.local/state/prn/replies.json` | Cached reply analysis per PR, refreshed only when the PR changes |
+| `~/.local/state/prn/sections.json` | Which sections you've folded or unfolded |
   | `~/.local/state/prn/prn.log` | App log (`prn daemon logs`) |
   | `~/.local/state/prn/menubar.out.log` | Output from the menu bar process (startup errors land here) |
   | `~/Library/LaunchAgents/com.prn.menubar.plist` | The login item |

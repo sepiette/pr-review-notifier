@@ -148,7 +148,7 @@ if rumps is not None:
 
         def _maybe_render(self, _timer=None) -> None:
             self._check_changes()
-            mtime = (store.inbox_mtime(), store.seen_mtime())
+            mtime = (store.inbox_mtime(), store.seen_mtime(), store.sections_state_mtime())
             if mtime != self._last_mtime:
                 self._last_mtime = mtime
                 self._render(store.read_inbox())
@@ -178,13 +178,28 @@ if rumps is not None:
                     self.menu.add(rumps.separator)
                 shown = 0
                 seen = store.read_seen() if settings.read_tracking else None
+                folded = store.read_collapsed()
                 for sec in inbox.sections:
                     if not sec.prs and settings.hide_empty_sections:
                         continue
                     if shown:
                         self.menu.add(rumps.separator)
                     shown += 1
-                    self.menu.add(rumps.MenuItem(f"{sec.name} ({len(sec.prs)})"))
+                    title = f"{sec.name} ({len(sec.prs)})"
+                    if store.is_collapsed(folded, sec):
+                        # Folded: one line with a submenu. Hovering shows the PRs; "Show inline" unfolds it.
+                        hint = store.section_hint(sec, seen, inbox.me, settings.read_tracking, settings.reply_tracking)
+                        target = rumps.MenuItem(f"▸ {title}{hint}")
+                        unfold = rumps.MenuItem("Show inline", callback=self._toggle_section)
+                        unfold._prn_section = sec  # type: ignore[attr-defined]
+                        target.add(unfold)
+                        target.add(rumps.separator)
+                        self.menu.add(target)
+                    else:
+                        header = rumps.MenuItem(f"▾ {title}", callback=self._toggle_section)  # click to fold
+                        header._prn_section = sec  # type: ignore[attr-defined]
+                        self.menu.add(header)
+                        target = self.menu
                     for pr in sec.prs:
                         read = seen is not None and not store.is_unread(seen, pr, sec.name, inbox.me)
                         reply = settings.reply_tracking and store.has_unread_reply(
@@ -193,7 +208,7 @@ if rumps is not None:
                         item = rumps.MenuItem(menu_style.plain(segments), callback=self._open_pr)
                         item._prn_url = pr.url  # type: ignore[attr-defined]
                         item._prn_seen = (pr, sec.name)  # type: ignore[attr-defined]
-                        self.menu.add(item)
+                        target.add(item)
                         menu_style.apply(item, segments)  # native colors; plain text if unavailable
                 if not shown:
                     self.menu.add(rumps.MenuItem("Inbox zero 🎉"))
@@ -225,6 +240,16 @@ if rumps is not None:
                 self._status_item.title = f"Last updated {updated} · next in {fmt.until(inbox.next_poll_at)}"
 
         # ------------------------------------------------------------ actions
+
+        def _toggle_section(self, sender) -> None:
+            sec = getattr(sender, "_prn_section", None)
+            if sec is None:
+                return
+            try:
+                store.toggle_collapsed(sec)
+            except Exception:
+                log.exception("couldn't toggle section %s", sec.name)
+            self._render(self._inbox)
 
         def _open_pr(self, sender) -> None:
             url = getattr(sender, "_prn_url", None)

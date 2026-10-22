@@ -55,6 +55,7 @@ class PRNTui(App):
         self._seen_mtime = -1.0
         self._read_tracking = True
         self._reply_tracking = True
+        self._sections_by_id: dict = {}
         self._filter = ""
         self._refreshing = False
 
@@ -77,7 +78,7 @@ class PRNTui(App):
     # ---------------------------------------------------------------- data
 
     def _reload(self, force: bool = False) -> None:
-        mtime, seen_mtime = store.inbox_mtime(), store.seen_mtime()
+        mtime, seen_mtime = store.inbox_mtime(), (store.seen_mtime(), store.sections_state_mtime())
         if not force and mtime == self._mtime and seen_mtime == self._seen_mtime:
             return
         self._mtime, self._seen_mtime = mtime, seen_mtime
@@ -115,14 +116,28 @@ class PRNTui(App):
             ol.add_option(Option(Text("No data yet. Press r to refresh.", style="dim"), disabled=True))
             return
         seen = store.read_seen()
+        folded = store.read_collapsed()
         me = self._inbox.me
-        first_pr_index = None
+        first_pr_index = first_header_index = None
+        self._sections_by_id = {}
         for sec in self._inbox.sections:
             visible = [p for p in sec.prs if self._matches_filter(p)]
-            header = Text.assemble((f"▾ {sec.name} ", "bold"), (f"({len(visible)})", "dim"))
+            # Folded sections hide their PRs, except while filtering (so matches are never hidden).
+            collapsed = store.is_collapsed(folded, sec) and not self._filter
+            header = Text.assemble((f"{'▸' if collapsed else '▾'} {sec.name} ", "bold"), (f"({len(visible)})", "dim"))
             if sec.badge:
                 header.append("  ●", style="magenta")
-            ol.add_option(Option(header, disabled=True))
+            if collapsed:
+                hint = store.section_hint(sec, seen, me, self._read_tracking, self._reply_tracking)
+                if hint:
+                    header.append(hint, style="bold")
+            sid = f"§{sec.name}"
+            self._sections_by_id[sid] = sec
+            ol.add_option(Option(header, id=sid))   # Enter on a header folds / unfolds it
+            if first_header_index is None:
+                first_header_index = ol.option_count - 1
+            if collapsed:
+                continue
             for pr in visible:
                 self._prs[pr.key] = pr
                 self._section_of[pr.key] = sec.name
@@ -161,7 +176,7 @@ class PRNTui(App):
             except Exception:
                 target = None
         if target is None:
-            target = first_pr_index
+            target = first_pr_index if first_pr_index is not None else first_header_index
         if target is not None:
             ol.highlighted = target
         self._show_detail(self._current_pr())
@@ -242,9 +257,29 @@ class PRNTui(App):
     # ---------------------------------------------------------------- events
 
     def on_option_list_option_highlighted(self, event: OptionList.OptionHighlighted) -> None:
+        sec = self._sections_by_id.get(event.option.id or "")
+        if sec is not None:
+            self._show_section_detail(sec)
+            return
         self._show_detail(self._prs.get(event.option.id) if event.option.id else None)
 
+    def _show_section_detail(self, sec) -> None:
+        folded = store.is_collapsed(store.read_collapsed(), sec)
+        t = Text()
+        t.append(f"{sec.name}\n\n", style="bold")
+        t.append(f"{len(sec.prs)} PR{'s' if len(sec.prs) != 1 else ''}"
+                 + ("  · counts toward the menu bar number" if sec.badge else "") + "\n\n")
+        t.append("Folded. " if folded else "Unfolded. ", style="bold")
+        t.append("Press Enter to " + ("show its PRs." if folded else "fold it.") + "\n", style="dim")
+        t.append("The menu bar remembers the same choice.", style="dim")
+        self.query_one("#detail", Static).update(t)
+
     def on_option_list_option_selected(self, event: OptionList.OptionSelected) -> None:
+        sec = self._sections_by_id.get(event.option.id or "")
+        if sec is not None:
+            store.toggle_collapsed(sec)
+            self._reload(force=True)
+            return
         pr = self._prs.get(event.option.id) if event.option.id else None
         if pr:
             self._open(pr)

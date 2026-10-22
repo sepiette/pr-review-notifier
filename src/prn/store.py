@@ -40,6 +40,7 @@ class InboxSection:
     notify: bool
     badge: bool
     prs: list[PR] = field(default_factory=list)
+    collapsed: bool = False   # config's starting state (see is_collapsed)
 
 
 @dataclass
@@ -67,7 +68,7 @@ def write_inbox(results: list[SectionResult], me: str, next_poll_at: Optional[fl
         generated_at=time.time(),
         next_poll_at=next_poll_at,
         error=error,
-        sections=[InboxSection(r.name, r.notify, r.badge, r.prs) for r in results if r.display],
+        sections=[InboxSection(r.name, r.notify, r.badge, r.prs, r.collapsed) for r in results if r.display],
         strategy=strategy,
     )
     _atomic_write_json(paths.inbox_path(), {
@@ -78,7 +79,8 @@ def write_inbox(results: list[SectionResult], me: str, next_poll_at: Optional[fl
         "error": inbox.error,
         "badge_count": inbox.badge_count,
         "sections": [
-            {"name": s.name, "notify": s.notify, "badge": s.badge, "prs": [p.to_dict() for p in s.prs]}
+            {"name": s.name, "notify": s.notify, "badge": s.badge, "collapsed": s.collapsed,
+             "prs": [p.to_dict() for p in s.prs]}
             for s in inbox.sections
         ],
     })
@@ -113,7 +115,7 @@ def read_inbox() -> Optional[Inbox]:
         error=data.get("error"),
         sections=[
             InboxSection(s["name"], s.get("notify", True), s.get("badge", False),
-                         [PR.from_dict(p) for p in s.get("prs", [])])
+                         [PR.from_dict(p) for p in s.get("prs", [])], s.get("collapsed", False))
             for s in data.get("sections", [])
         ],
         strategy=data.get("strategy", "conservative"),
@@ -196,6 +198,50 @@ def mark_unread(keys: list[str]) -> None:
     for k in keys:
         seen.pop(k, None)
     _atomic_write_json(paths.seen_path(), {"prs": seen})
+
+
+# ---------------------------------------------------------------- collapsed sections
+
+
+def sections_state_mtime() -> float:
+    try:
+        return paths.sections_state_path().stat().st_mtime
+    except FileNotFoundError:
+        return 0.0
+
+
+def read_collapsed() -> dict[str, dict]:
+    """{section name: {"collapsed": bool, "config": the config's value when I toggled it}}."""
+    return (_read_json(paths.sections_state_path()) or {}).get("sections", {})
+
+
+def is_collapsed(state: dict[str, dict], section: InboxSection) -> bool:
+    """My last toggle wins, unless the config's `collapsed:` has changed since then."""
+    entry = state.get(section.name)
+    if entry is not None and entry.get("config") == section.collapsed:
+        return bool(entry.get("collapsed"))
+    return section.collapsed
+
+
+def set_collapsed(section: InboxSection, collapsed: bool) -> None:
+    state = read_collapsed()
+    state[section.name] = {"collapsed": collapsed, "config": section.collapsed}
+    _atomic_write_json(paths.sections_state_path(), {"sections": state})
+
+
+def toggle_collapsed(section: InboxSection) -> bool:
+    now = not is_collapsed(read_collapsed(), section)
+    set_collapsed(section, now)
+    return now
+
+
+def section_hint(section: InboxSection, seen: Optional[dict[str, dict]], me: str,
+                 read_tracking: bool, reply_tracking: bool) -> str:
+    """What a folded section shows after its count: ' · 💬 1 · 2 new' (empty when nothing's waiting)."""
+    replies = sum(1 for p in section.prs if reply_tracking and has_unread_reply(seen or {}, p, read_tracking))
+    new = sum(1 for p in section.prs if read_tracking and is_unread(seen or {}, p, section.name, me))
+    parts = ([f"💬 {replies}"] if replies else []) + ([f"{new} new"] if new else [])
+    return "".join(f" · {x}" for x in parts)
 
 
 # ---------------------------------------------------------------- lock

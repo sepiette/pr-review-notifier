@@ -76,6 +76,11 @@ def replies_path() -> Path:
     return state_dir() / "replies.json"
 
 
+def sections_state_path() -> Path:
+    """Which sections I've folded or unfolded in the menu bar / TUI."""
+    return state_dir() / "sections.json"
+
+
 def lock_path() -> Path:
     return state_dir() / "poll.lock"
 
