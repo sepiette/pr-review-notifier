@@ -137,3 +137,23 @@ sections:
 """)
     events = run(c, [], [node(number=130, labels=["blocked"]), node(number=131)])
     assert [(e.kind, e.pr.number) for e in events] == [(ev.NEW_IN_SECTION, 131)]
+
+
+def test_muted_section_sends_nothing():
+    from prn.config import parse
+    c = parse("""
+defaults: {repos: [acme/web]}
+settings: {notifications: {replies: true}}
+groups: {other_team: [dave]}
+sections:
+  - name: Other team
+    mute: true
+    filters: {authors: [group:other_team]}
+  - name: Everything
+    filters: {}
+""")
+    reviewed = node(author="dave", number=140, reviews=[review(ME, "CHANGES_REQUESTED")])
+    rerequested = node(author="dave", number=140, reviews=[review(ME, "CHANGES_REQUESTED")], req_users=[ME])
+    assert run(c, [], [node(author="dave", number=141)]) == []                       # new in section
+    assert run(c, [reviewed], [rerequested], requested={"PR_140"}) == []            # re-review
+    assert [e.pr.number for e in run(c, [], [node(author="erin", number=142)])] == [142]   # others still notify

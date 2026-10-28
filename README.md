@@ -306,6 +306,7 @@ sections:                          # checked top to bottom; first match wins
     notify: true                   # notify when a PR newly enters this section (default true)
     badge: true                    # count toward the menu bar number (default false)
     collapsed: false               # true: start folded (see "Folding sections"); clicking toggles it
+    mute: false                    # true: no notifications at all for this section's PRs
     display: true                  # false: still claims matching PRs, but hides the section everywhere
                                    #        and never sends "New in section" notifications
     filters:
@@ -412,7 +413,7 @@ Notifications come from **PR Review Notifier**, with its own icon. Clicking one 
 - **Busy polls:** if more than 5 PRs change at once, you get a single summary instead.
 - **First run:** setup's first poll is silent, so PRs that were already open don't flood you.
 - **App alerts:** you also get a notification when you save an invalid `config.yaml`, or when a code update fails to load.
-- **Turning things off:** each event type has its own setting under `settings.notifications`, and each section has its own `notify` option.
+- **Turning things off:** each event type has its own setting under `settings.notifications`, and each section has its own `notify` option. `notify: false` only stops "New in section" alerts. To silence a section completely (re-review requests, replies, CI, everything), set `mute: true` on it. That's handy for a former team's PRs you still want to see but not hear about.
 
 To check notifications are working, run `prn test-notification`. If nothing appears, allow **PR Review Notifier** under System Settings → Notifications.
 

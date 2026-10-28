@@ -42,6 +42,7 @@ groups:
 # Sections are evaluated top to bottom; a PR appears only in the FIRST section it matches.
 # notify: send a desktop notification when a PR newly enters this section
 # badge:  count this section's PRs in the menu bar number
+# mute:   no notifications at all for PRs in this section (notify: false only silences "New in section")
 # collapsed: start folded (a submenu in the menu bar; just the header in the TUI). Click the header in the
 #            menu bar or press Enter on it in the TUI to toggle; your choice is remembered.
 sections:

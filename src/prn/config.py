@@ -86,6 +86,7 @@ class Section(_Strict):
     badge: bool = False
     display: bool = True     # false: still claims matching PRs, but is left out of every inbox view
     collapsed: bool = False  # start folded; clicking the header (menu bar) or Enter (TUI) toggles it
+    mute: bool = False       # no notifications of any kind for PRs in this section (re-reviews, replies, CI…)
     filters: Filters = Field(default_factory=Filters)
 
 

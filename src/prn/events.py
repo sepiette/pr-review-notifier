@@ -74,6 +74,7 @@ def diff(prev: dict[str, dict], results: list[SectionResult], all_prs: list[PR],
     me_l = me.lower()
     # Hidden sections (display: false) never notify; you can't see the PR anywhere in the inbox.
     notify_sections = {s.name for s in cfg.sections if s.notify and s.display}
+    muted_sections = {s.name for s in cfg.sections if s.mute}
     section_of = {pr.key: r.name for r in results for pr in r.prs}
     events: list[Event] = []
 
@@ -81,6 +82,8 @@ def diff(prev: dict[str, dict], results: list[SectionResult], all_prs: list[PR],
         old = prev.get(pr.key)
         cur = snapshot_entry(pr, section_of.get(pr.key), me)
         sec = cur["section"]
+        if sec in muted_sections:
+            continue  # `mute: true`: nothing from this section, not even re-reviews or replies
 
         # 1. Entered a notifying section (skip moves caused by my own review: I already know)
         moved_by_me = old is not None and (
