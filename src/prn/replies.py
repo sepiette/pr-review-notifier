@@ -130,11 +130,14 @@ def attach(client, prs: list[PR], cfg: Config, me: str) -> None:
     for i in range(0, len(stale), CHUNK):
         chunk = stale[i:i + CHUNK]
         try:
-            data = client.graphql(REPLIES_QUERY, {"ids": [p.id for p in chunk]})
+            if hasattr(client, "split_on_limits"):
+                nodes = client.split_on_limits(REPLIES_QUERY, [p.id for p in chunk])   # halves on resource limits
+            else:
+                nodes = client.graphql(REPLIES_QUERY, {"ids": [p.id for p in chunk]}).get("nodes")
         except Exception as exc:  # keep polling even if this extra request fails
             log.warning("reply check failed for %d PRs: %s", len(chunk), exc)
             continue
-        by_id = {n["id"]: n for n in data.get("nodes") or [] if n}
+        by_id = {n["id"]: n for n in nodes or [] if n}
         for p in chunk:
             if p.id in by_id:
                 cache[p.id] = {"updated_at": p.updated_at, "me": me.lower(),

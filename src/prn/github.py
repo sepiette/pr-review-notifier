@@ -23,6 +23,7 @@ API_URL = "https://api.github.com/graphql"
 SEARCH_BASE = "is:pr is:open archived:false"
 MAX_QUERY_LEN = 256          # GitHub search query length limit
 PAGE_SIZE = 50
+MIN_PAGE_SIZE = 5           # smallest page we shrink to when GitHub says a query is too heavy
 MAX_PAGES = 20               # 1000 results: GitHub's search ceiling
 CHECK_PAGE_SIZE = 100        # change checks fetch one page per search; more than this falls back to a full poll
 NODES_BATCH = 25             # PRs per refetch request
@@ -34,6 +35,11 @@ EXTRA_BIN_DIRS = ["/opt/homebrew/bin", "/usr/local/bin"]
 
 class GitHubError(Exception):
     pass
+
+
+class ResourceLimitError(GitHubError):
+    """GitHub refused a query as too expensive to run ("Resource limits for this query exceeded").
+    Retrying won't help; asking for less per request does."""
 
 
 class AuthError(GitHubError):
@@ -166,6 +172,7 @@ class GitHubClient:
         )
         self.rate_remaining: Optional[int] = None
         self.points_used = 0     # sum of GraphQL rateLimit.cost across this client's requests
+        self.page_size = PAGE_SIZE   # shrinks (and stays smaller) if GitHub reports resource limits
         self._lock = threading.Lock()
 
     def close(self) -> None:
@@ -191,6 +198,9 @@ class GitHubClient:
             body = resp.json()
             if body.get("errors"):
                 msgs = "; ".join(e.get("message", str(e)) for e in body["errors"])
+                if any(e.get("type") == "RESOURCE_LIMITS_EXCEEDED" or "resource limits" in str(e.get("message", "")).lower()
+                       for e in body["errors"]):
+                    raise ResourceLimitError(f"GraphQL error: {msgs}")
                 raise GitHubError(f"GraphQL error: {msgs}")
             data = body.get("data") or {}
             rl = data.get("rateLimit")
@@ -239,8 +249,16 @@ class GitHubClient:
     def search_prs(self, q: str) -> list[dict]:
         nodes: list[dict] = []
         after = None
-        for _ in range(MAX_PAGES):
-            data = self.graphql(SEARCH_QUERY, {"q": q, "first": PAGE_SIZE, "after": after})
+        for _ in range(MAX_PAGES * (PAGE_SIZE // MIN_PAGE_SIZE)):
+            try:
+                data = self.graphql(SEARCH_QUERY, {"q": q, "first": self.page_size, "after": after})
+            except ResourceLimitError:
+                if self.page_size <= MIN_PAGE_SIZE:
+                    raise
+                with self._lock:
+                    self.page_size = max(MIN_PAGE_SIZE, self.page_size // 2)
+                log.warning("GitHub said the search was too heavy; retrying with %d PRs per page", self.page_size)
+                continue   # same cursor, smaller page
             search = data["search"]
             nodes.extend(n for n in search["nodes"] if n)
             if not search["pageInfo"]["hasNextPage"]:
@@ -253,7 +271,14 @@ class GitHubClient:
 
         Returns one node list per query, or None if any search has more results than one page holds.
         """
-        data = self.graphql(_check_query(len(queries)), {f"q{i}": q for i, q in enumerate(queries)})
+        try:
+            data = self.graphql(_check_query(len(queries)), {f"q{i}": q for i, q in enumerate(queries)})
+        except ResourceLimitError:
+            if len(queries) == 1:
+                raise
+            mid = len(queries) // 2   # too heavy as one request: split the searches in two
+            first, second = self.check_searches(queries[:mid]), self.check_searches(queries[mid:])
+            return None if first is None or second is None else first + second
         out = []
         for i in range(len(queries)):
             search = data[f"s{i}"]
@@ -265,8 +290,19 @@ class GitHubClient:
     def nodes_by_id(self, ids: list[str]) -> list[dict]:
         """Full PR nodes for `ids`, fetched in parallel batches. PRs that no longer exist are dropped."""
         batches = [ids[i:i + NODES_BATCH] for i in range(0, len(ids), NODES_BATCH)]
-        results = _parallel(lambda b: self.graphql(NODES_QUERY, {"ids": b})["nodes"], batches)
+        results = _parallel(lambda b: self.split_on_limits(NODES_QUERY, b), batches)
         return [n for batch in results for n in batch if n]
+
+    def split_on_limits(self, query: str, ids: list[str]) -> list[Optional[dict]]:
+        """Run a `nodes(ids:)` query, halving the batch whenever GitHub says it's too heavy."""
+        try:
+            return self.graphql(query, {"ids": ids})["nodes"]
+        except ResourceLimitError:
+            if len(ids) == 1:
+                raise
+            mid = len(ids) // 2
+            log.warning("GitHub said a %d-PR request was too heavy; splitting it", len(ids))
+            return self.split_on_limits(query, ids[:mid]) + self.split_on_limits(query, ids[mid:])
 
 
 # ---------------------------------------------------------------- parsing
