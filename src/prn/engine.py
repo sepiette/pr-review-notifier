@@ -100,13 +100,13 @@ def matches(pr: PR, section: Section, cfg: Config, me: str, now: Optional[dateti
     if f.ready_to_merge is not None and pr.ready_to_merge != f.ready_to_merge:
         return False
 
-    if f.awaiting_approval_from and all(pr.approved_head_by(u) for u in f.awaiting_approval_from):
+    if f.awaiting_approval_from and all(pr.approved_by(u) for u in f.awaiting_approval_from):
         return False
 
     if f.has_replies_to_me is not None and (pr.reply_count > 0) != f.has_replies_to_me:
         return False
 
-    if f.approved_by and not any(pr.approved_head_by(u) for u in f.approved_by):
+    if f.approved_by and not any(pr.approved_by(u) for u in f.approved_by):
         return False
 
     if f.updated_within_days is not None:

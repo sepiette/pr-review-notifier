@@ -360,9 +360,9 @@ All filters in a section must match (AND). Inside a list, any one item can match
 | `ci` | `success` · `failure` · `pending` · `none` | Combined check status of the latest commit |
 | `conflicts` | `true` / `false` | GitHub reports merge conflicts with the base branch. While GitHub is still computing, this counts as no conflicts |
 | `ready_to_merge` | `true` / `false` | GitHub's merge state is clean: branch protection is satisfied (required reviews and required checks such as policy-bot), every other check passed, and there are no conflicts. While GitHub is still computing, this counts as not ready |
-| `awaiting_approval_from` | usernames | Any of these reviewers hasn't approved the PR's **latest commit**, for example `[coderabbitai]` while it re-reviews a new push. Not affected by `ignored_reviewers` |
+| `awaiting_approval_from` | usernames | Any of these reviewers has no approval that GitHub counts, for example `[coderabbitai]` until it approves. Matches GitHub: an approval on an older commit still counts unless the repo dismisses stale approvals on push, or the reviewer later requests changes. Not affected by `ignored_reviewers` |
 | `has_replies_to_me` | `true` / `false` | Someone replied in a review thread you're in, or @mentioned you, and you haven't posted since. Needs `reply_tracking`. Optional: the starter config doesn't use it. `settings.replies_section: true` adds a ready-made section that uses it. Adding it to a section also makes prn search for open PRs you've commented on, reviewed, or been mentioned in |
-| `approved_by` | usernames | Any of these reviewers has approved the PR's **latest commit**. An approval on an older commit doesn't count. Not affected by `ignored_reviewers` |
+| `approved_by` | usernames | Any of these reviewers has an approval that GitHub counts: their latest approve/request-changes review is an approval and it wasn't dismissed. Not affected by `ignored_reviewers` |
 | `updated_within_days` | number | Updated within the last N days |
 
 Unknown keys and bad values are rejected with the exact location of the problem. If an unknown key is a newer setting, the error message tells you to reinstall.

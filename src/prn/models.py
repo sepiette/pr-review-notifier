@@ -83,11 +83,14 @@ class PR:
     def approvals(self, ignored: frozenset[str] = frozenset()) -> int:
         return sum(1 for r in self.latest_reviews if r.state == "APPROVED" and r.author not in ignored)
 
-    def approved_head_by(self, login: str) -> bool:
-        """`login` has an APPROVED review on the PR's latest commit."""
+    def approved_by(self, login: str) -> bool:
+        """`login`'s approval counts on GitHub: their latest opinionated review is APPROVED and wasn't dismissed.
+
+        Matches GitHub rather than requiring the approval to be on the latest commit. Repos that dismiss
+        stale approvals on push mark the old review DISMISSED, so it stops counting there too.
+        """
         login = login.lower().removesuffix("[bot]")
-        return any(r.author == login and r.state == "APPROVED" and r.commit == self.head_oid
-                   for r in self.reviews + self.latest_reviews)
+        return any(r.author == login and r.state == "APPROVED" for r in self.latest_reviews)
 
     def activity(self, me: str) -> dict:
         """What other people have done on the PR. Compared against the copy saved when I last opened it."""
