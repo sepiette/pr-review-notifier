@@ -116,3 +116,58 @@ def test_lock_prevents_concurrent_polls():
         with pytest.raises(store.LockBusy):
             with store.poll_lock(wait_seconds=0):
                 pass
+
+
+def _search_ok(nodes):
+    return httpx.Response(200, json={"data": {
+        "rateLimit": {"remaining": 4999, "resetAt": "x", "cost": 1},
+        "search": {"issueCount": len(nodes), "pageInfo": {"hasNextPage": False, "endCursor": None}, "nodes": nodes},
+    }})
+
+
+@respx.mock
+def test_search_halves_page_size_when_github_times_out(monkeypatch):
+    monkeypatch.setattr("prn.github.time.sleep", lambda s: None)
+    sizes = []
+
+    def handler(request):
+        first = json.loads(request.content)["variables"]["first"]
+        sizes.append(first)
+        return httpx.Response(502, text="<html>502</html>") if first > 10 else _search_ok([node(number=1)])
+
+    respx.post(API_URL).mock(side_effect=handler)
+    nodes = GitHubClient(token="t").search_prs("is:pr")
+    assert [n["number"] for n in nodes] == [1]
+    assert sizes == [25, 12, 6]
+
+
+@respx.mock
+def test_search_gives_up_at_the_minimum_page_size(monkeypatch):
+    monkeypatch.setattr("prn.github.time.sleep", lambda s: None)
+    route = respx.post(API_URL).mock(return_value=httpx.Response(502, text="<html>502</html>"))
+    from prn.github import GatewayTimeout
+    with pytest.raises(GatewayTimeout, match="timed out"):
+        GitHubClient(token="t").search_prs("is:pr")
+    assert route.call_count == 3 + 3   # 25, 12, 6 once each; 5 with retries
+
+
+@respx.mock
+def test_merge_state_is_only_requested_when_a_section_uses_ready_to_merge():
+    from prn.github import fetch_prs
+    seen = []
+
+    def handler(request):
+        body = json.loads(request.content)
+        if "viewer" in body["query"] and "search" not in body["query"]:
+            return httpx.Response(200, json={"data": {"viewer": {"login": ME}}})
+        seen.append(body["variables"]["mergeState"])
+        return _search_ok([])
+
+    respx.post(API_URL).mock(side_effect=handler)
+    plain = config_mod.parse("defaults: {repos: [acme/web]}\nsections: [{name: a}]")
+    ready = config_mod.parse("defaults: {repos: [acme/web]}\nsections: [{name: a, filters: {ready_to_merge: true}}]")
+    fetch_prs(GitHubClient(token="t"), plain, ME)
+    assert seen and not any(seen)
+    seen.clear()
+    fetch_prs(GitHubClient(token="t"), ready, ME)
+    assert seen and all(seen)

@@ -62,7 +62,7 @@ def test_search_shrinks_page_size_and_remembers_it():
     client = GitHubClient(token="t")
     got = client.search_prs("is:pr is:open repo:acme/web")
     assert [n["number"] for n in got] == list(range(1, 31))      # nothing lost or duplicated
-    assert fake.page_sizes[:3] == [50, 25, 12] and client.page_size == 12
+    assert fake.page_sizes[:2] == [25, 12] and client.page_size == 12   # starts at 25 (PR #10), halves on limits
     fake.page_sizes.clear()
     client.search_prs("is:pr is:open repo:acme/api")
     assert fake.page_sizes[0] == 12                              # the smaller size sticks for this client
